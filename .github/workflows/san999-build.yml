@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - san999-dev
+    paths-ignore:
+      - 'web-build/game.gba'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-rom:
@@ -34,8 +36,20 @@ jobs:
           COMPARE: 0
         run: make -j$(nproc) -O all
 
-      - name: Verify ROM output
-        run: test -f pokeemerald.gba
+      - name: Publish ROM in repository
+        run: |
+          test -f pokeemerald.gba
+          mkdir -p web-build
+          cp pokeemerald.gba web-build/game.gba
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web-build/game.gba
+          if git diff --cached --quiet; then
+            echo "ROM unchanged"
+            exit 0
+          fi
+          git commit -m "Publish web ROM"
+          git push origin HEAD:san999-dev
 
       - name: Upload ROM artifact
         uses: actions/upload-artifact@v4
