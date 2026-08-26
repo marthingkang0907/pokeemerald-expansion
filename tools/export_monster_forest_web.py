@@ -1,65 +1,33 @@
 #!/usr/bin/env python3
-"""Export Pokémon data and sprite assets for the Monster Forest web client.
-
-Run from the pokeemerald-expansion repository:
-  python3 tools/export_monster_forest_web.py --out ../monster-forest-assets
-
-The exporter deliberately emits an engine-neutral contract.  The PWA must never
-read C headers directly; it only consumes the generated JSON and PNG/WebP paths.
-"""
+"""Build the JSON + sprite package consumed by 100days/mons.html."""
 from __future__ import annotations
-import argparse, json, re, shutil
+import argparse,json,re,shutil
 from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-TYPE_RE = re.compile(r"TYPE_([A-Z_]+)")
-FIELD_RE = re.compile(r"\.(baseHP|baseAttack|baseDefense|baseSpeed|baseSpAttack|baseSpDefense|type1|type2|catchRate|expYield|genderRatio|growthRate|abilities)\s*=\s*([^,\n}]+)")
-ENTRY_RE = re.compile(r"\[SPECIES_([A-Z0-9_]+)\]\s*=\s*\{(.*?)\n\s*\},", re.S)
-
-def clean(value: str):
-    return value.strip().replace("TYPE_", "").lower().replace("ABILITY_", "").lower()
-
-def species_records():
-    src = (ROOT / "src/data/pokemon/species_info.h").read_text(encoding="utf-8")
-    out = []
-    for key, body in ENTRY_RE.findall(src):
-        if key in {"NONE", "EGG"}: continue
-        fields = {name: clean(value) for name, value in FIELD_RE.findall(body)}
-        if not fields: continue
-        stats = {
-            "hp": int(fields.get("baseHP", 1)),
-            "attack": int(fields.get("baseAttack", 1)),
-            "defense": int(fields.get("baseDefense", 1)),
-            "speed": int(fields.get("baseSpeed", 1)),
-            "specialAttack": int(fields.get("baseSpAttack", 1)),
-            "specialDefense": int(fields.get("baseSpDefense", 1)),
-        }
-        slug = key.lower().replace("_", "-")
-        out.append({"id": key.lower(), "species": key, "slug": slug,
-                    "types": [fields.get("type1", "normal")] + ([] if fields.get("type2") in (None, fields.get("type1")) else [fields["type2"]]),
-                    "baseStats": stats, "catchRate": int(fields.get("catchRate", 0)),
-                    "growthRate": fields.get("growthRate", "medium_fast"),
-                    "sprites": {"front": f"sprites/{slug}/front.png", "back": f"sprites/{slug}/back.png", "icon": f"sprites/{slug}/icon.png"}})
-    return out
-
-def copy_sprites(records, out):
-    for mon in records:
-        src = ROOT / "graphics/pokemon" / mon["slug"]
-        dst = out / "sprites" / mon["slug"]
-        if not src.exists(): continue
-        dst.mkdir(parents=True, exist_ok=True)
-        for view, candidates in {"front": ("front.png","front.4bpp.png"), "back": ("back.png","back.4bpp.png"), "icon": ("icon.png","icon.4bpp.png")}.items():
-            found = next((src / n for n in candidates if (src / n).exists()), None)
-            if found: shutil.copy2(found, dst / f"{view}.png")
-
+ROOT=Path(__file__).resolve().parents[1]
+ENTRY=re.compile(r"\[SPECIES_([A-Z0-9_]+)\]\s*=\s*\{(.*?)\n\s*\},",re.S)
+FIELD=re.compile(r"\.(baseHP|baseAttack|baseDefense|baseSpeed|baseSpAttack|baseSpDefense|type1|type2|catchRate|growthRate)\s*=\s*([^,\n}]+)")
+def val(x): return x.strip().replace("TYPE_","").lower()
+def num(x): 
+ try:return int(x)
+ except ValueError:return 0
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--out", required=True, type=Path); args = ap.parse_args()
-    out = args.out.resolve(); out.mkdir(parents=True, exist_ok=True)
-    species = species_records()
-    moves = json.loads((ROOT / "src/data/pokemon/all_learnables.json").read_text(encoding="utf-8"))
-    (out / "pokemon-species.json").write_text(json.dumps({"schemaVersion":1,"species":species}, ensure_ascii=False, indent=2), encoding="utf-8")
-    (out / "pokemon-learnsets.json").write_text(json.dumps({"schemaVersion":1,"learnsets":moves}, ensure_ascii=False), encoding="utf-8")
-    copy_sprites(species, out)
-    print(f"Exported {len(species)} species to {out}")
-
-if __name__ == "__main__": main()
+ ap=argparse.ArgumentParser();ap.add_argument("--out",required=True,type=Path);a=ap.parse_args();out=a.out;out.mkdir(parents=True,exist_ok=True)
+ # species_info.h is only an include dispatcher in this expansion. Read each
+ # generation family file, so the exported catalogue is real data, not a stub.
+ text="\n".join(p.read_text(encoding="utf8") for p in sorted((ROOT/"src/data/pokemon/species_info").glob("gen_*_families.h")))
+ species=[]
+ for key,body in ENTRY.findall(text):
+  f={k:val(v) for k,v in FIELD.findall(body)}
+  if not f:continue
+  slug=key.lower().replace("_","-"); types=[f.get("type1","normal")]
+  if f.get("type2") and f["type2"]!=types[0]:types.append(f["type2"])
+  species.append({"id":key.lower(),"slug":slug,"name":key.replace("_"," ").title(),"types":types,"baseStats":{"hp":num(f.get("baseHP","0")),"attack":num(f.get("baseAttack","0")),"defense":num(f.get("baseDefense","0")),"speed":num(f.get("baseSpeed","0")),"specialAttack":num(f.get("baseSpAttack","0")),"specialDefense":num(f.get("baseSpDefense","0"))},"catchRate":num(f.get("catchRate","0")),"growthRate":f.get("growthRate","medium_fast"),"sprites":{"front":f"sprites/{slug}/front.png","back":f"sprites/{slug}/back.png","icon":f"sprites/{slug}/icon.png"}})
+  src=ROOT/"graphics/pokemon"/slug;dst=out/"sprites"/slug
+  for view,names in {"front":["front.png","front.4bpp.png"],"back":["back.png","back.4bpp.png"],"icon":["icon.png","icon.4bpp.png"]}.items():
+   p=next((src/n for n in names if (src/n).exists()),None)
+   if p:dst.mkdir(parents=True,exist_ok=True);shutil.copy2(p,dst/f"{view}.png")
+ (out/"pokemon-species.json").write_text(json.dumps({"schemaVersion":1,"species":species},ensure_ascii=False,separators=(",",":")),encoding="utf8")
+ # Kept separate: expansion's all_learnables is already structured and large.
+ shutil.copy2(ROOT/"src/data/pokemon/all_learnables.json",out/"pokemon-learnsets.json")
+ print("exported",len(species),"species")
+if __name__=="__main__":main()
