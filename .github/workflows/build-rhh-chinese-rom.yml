@@ -1,0 +1,38 @@
+name: Build RH Hideout Chinese ROM
+
+on:
+  push:
+    branches: [tmp-build-rhh-chinese-rom]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Chinese repository
+        uses: actions/checkout@v4
+        with:
+          repository: rh-hideout-chinese/pokeemerald-expansion
+          ref: master
+          path: game
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends binutils-arm-none-eabi gcc-arm-none-eabi libnewlib-arm-none-eabi libpng-dev python3
+
+      - name: Build ROM
+        working-directory: game
+        env:
+          GAME_VERSION: EMERALD
+        run: make -j$(nproc) -O all
+
+      - name: Locate ROM
+        run: find game -maxdepth 3 -type f -name '*.gba' -ls
+
+      - name: Upload ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: rh-hideout-chinese-pokeemerald-rom
+          path: game/**/*.gba
+          if-no-files-found: error
